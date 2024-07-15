@@ -4,11 +4,13 @@ import uuid
 from haystack.telemetry import tutorial_running
 from haystack.document_stores.in_memory import InMemoryDocumentStore
 from haystack import Document
-from haystack.components.embedders import SentenceTransformersDocumentEmbedder, SentenceTransformersTextEmbedder
+from haystack.components.embedders import SentenceTransformersDocumentEmbedder
+from haystack.components.embedders import SentenceTransformersTextEmbedder
 from haystack.components.retrievers.in_memory import InMemoryEmbeddingRetriever
 from haystack.components.builders import PromptBuilder
 from haystack.components.generators import OpenAIGenerator
 from haystack import Pipeline
+import os
 
 # Initialize telemetry
 tutorial_running(27)
@@ -22,10 +24,10 @@ def load_custom_dataset(file_path):
     df = pd.read_csv(file_path)
     # Ensure 'abstract' and 'title' columns are present and not null
     df = df.dropna(subset=['abstract', 'title'])
-    
+
     # Remove duplicates based on 'abstract' column to ensure uniqueness
     df = df.drop_duplicates(subset=['abstract'])
-    
+
     # Generate unique IDs and check for duplicates
     unique_ids = set()
     docs = []
@@ -35,10 +37,11 @@ def load_custom_dataset(file_path):
             doc_id = str(uuid.uuid4())
         unique_ids.add(doc_id)
         docs.append(Document(content=row['abstract'], meta={'title': row['title']}, id=doc_id))
-    
+
     return docs
 
-def main():
+# Streamlit app
+def run_app():
     st.title("GPT-3.5 Turbo Q&A")
 
     uploaded_file = st.file_uploader("Upload your custom dataset (CSV format)", type="csv")
@@ -50,15 +53,15 @@ def main():
         doc_embedder = SentenceTransformersDocumentEmbedder(model="sentence-transformers/all-MiniLM-L6-v2")
         doc_embedder.warm_up()
         docs_with_embeddings = doc_embedder.run(docs)
-        
+
         # Check for duplicate IDs in docs_with_embeddings
         unique_ids = set()
         unique_docs = []
-        for doc in docs_with_embeddings["documents"]:
+        for doc in docs_with_embeddings:
             if doc.id not in unique_ids:
                 unique_ids.add(doc.id)
                 unique_docs.append(doc)
-        
+
         # Write unique documents to document store
         try:
             document_store.write_documents(unique_docs)
@@ -87,6 +90,8 @@ def main():
         prompt_builder = PromptBuilder(template=template)
 
         # Set up OpenAI generator
+        if "OPENAI_API_KEY" not in os.environ:
+            os.environ["OPENAI_API_KEY"] = st.text_input("Enter OpenAI API key:", type="password")
         generator = OpenAIGenerator(model="gpt-3.5-turbo")
 
         # Build pipeline
@@ -107,5 +112,19 @@ def main():
             else:
                 st.write("Please enter a question.")
 
-if __name__ == "__main__":
-    main()
+# Flask integration
+from flask import Flask, render_template_string, request
+
+app = Flask(__name__)
+
+@app.route('/')
+def home():
+    return render_template_string('<h1>Welcome to GPT-3.5 Turbo Q&A!</h1>' +
+                                  '<p>Click <a href="/streamlit">here</a> to launch the Streamlit app.</p>')
+
+@app.route('/streamlit')
+def streamlit_app():
+    return run_app()
+
+if __name__ == '__main__':
+    app.run(debug=True)
